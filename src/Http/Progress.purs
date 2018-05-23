@@ -22,16 +22,17 @@ import Elm.Default
 import Data.List (List(..))
 import Elm.Dict as Dict
 import Elm.Foldable (foldl) as Elm.Foldlable
+import Elm.Http (Error)
 import Elm.Http as Http
 import Elm.Http.Internal (Request(Request))
 import Elm.Http.Internal as Http.Internal
-import Elm.Platform (Router) as Platform
 import Elm.Platform (Router, Manager, subscription)
+import Elm.Platform (Router, sendToApp) as Platform
 import Elm.Process (Id, kill, spawn) as Process
 import Elm.Task (Task)
-import Elm.Task (andThen, sequence, succeed) as Task
+import Elm.Task (andThen, onError, sequence, succeed) as Task
 import Partial.Unsafe (unsafeCrashWith)
-import Prelude (class Functor, Unit, map, (>>>))
+import Prelude (class Functor, Unit, map, (<<<), (>>>))
 import Type.Proxy (Proxy)
 
 
@@ -162,12 +163,23 @@ spawnRequests router trackedRequests st@(State state) =
 
 toTask :: ∀ msg. Router msg Unit -> TrackedRequest msg -> Task Never Unit
 toTask router (TrackedRequest { request, toProgress, toError }) =
-    unsafeCrashWith "TODO"
-    {-
-    Native.Http.toTask request (Just (Platform.sendToApp router << toProgress))
+    toProgressTask (Just (Platform.sendToApp router <<< toProgress)) request
         |> Task.andThen (Platform.sendToApp router)
-        |> Task.onError (Platform.sendToApp router << toError)
-    -}
+        |> Task.onError (Platform.sendToApp router <<< toError)
+
+
+type ProgressCallback =
+    { bytes :: Int
+    , bytesExpected :: Int
+    } -> Task Never Unit
+
+
+-- This is implemented via toTask, but we're ending up with circular imports
+-- which will need to be resolved.
+toProgressTask :: ∀ a. Maybe ProgressCallback -> Request a -> Task Error a
+toProgressTask cb (Request req) =
+    unsafeCrashWith "TODO"
+    -- Native.Http.toTask req Nothing
 
 
 

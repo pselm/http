@@ -16,7 +16,7 @@ import Elm.Time (Time)
 import Prelude (class Eq, class Functor)
 
 
-data Request a
+newtype Request a
     = Request (RawRequest a)
 
 derive instance functorRequest :: Functor Request
