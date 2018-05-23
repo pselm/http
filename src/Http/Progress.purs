@@ -16,8 +16,8 @@ module Elm.Http.Progress
     )
     where
 
+
 import Elm.Default
-import Elm.Process
 
 import Data.List (List(..))
 import Elm.Dict as Dict
@@ -31,7 +31,7 @@ import Elm.Process (Id, kill, spawn) as Process
 import Elm.Task (Task)
 import Elm.Task (andThen, sequence, succeed) as Task
 import Partial.Unsafe (unsafeCrashWith)
-import Prelude (class Functor, Unit, map)
+import Prelude (class Functor, Unit, map, (>>>))
 import Type.Proxy (Proxy)
 
 
@@ -67,18 +67,14 @@ data Progress d
 -- | >
 -- | > [demo]: https://hirafuji.com.br/elm/http-progress-example/
 -- | > [code]: https://gist.github.com/pablohirafuji/fa373d07c42016756d5bca28962008c4
-track :: ∀ msg a. String -> (Progress a -> msg) -> Http.Request a -> Sub msg
+track :: ∀ msg d. String -> (Progress d -> msg) -> Http.Request d -> Sub msg
 track id toMessage request =
-    subscription httpProgressManager <| Track id tracked
-    
-    where
-        tracked :: _
-        tracked =
-            TrackedRequest
-                { request : map (Done >> toMessage) request
-                , toProgress : Some >> toMessage
-                , toError : Fail >> toMessage
-                }
+    subscription httpProgressManager <| Track id <|
+        TrackedRequest
+            { request : map (Done >>> toMessage) request
+            , toProgress : Some >>> toMessage
+            , toError : Fail >>> toMessage
+            }
 
 
 newtype TrackedRequest msg = TrackedRequest
@@ -110,13 +106,13 @@ tag :: String
 tag = "Elm.Http.Progress"
 
 
-type State msg =
-    Dict.Dict String Process.Id
+newtype State msg = State
+    (Dict.Dict String Process.Id)
 
 
 init :: ∀ msg. Task Never (State msg)
 init =
-    Task.succeed Dict.empty
+    Task.succeed (State Dict.empty)
 
 
 
@@ -124,7 +120,7 @@ init =
 
 
 onEffects :: ∀ msg. Platform.Router msg Unit -> List (Proxy msg) -> List (MySub msg) -> State msg -> Task Never (State msg)
-onEffects router cmds subs state =
+onEffects router cmds subs (State state) =
     let
         subDict =
             collectSubs subs
@@ -150,18 +146,18 @@ onEffects router cmds subs state =
             Dict.merge leftStep bothStep rightStep state subDict ( Nil /\ Dict.empty /\ Nil )
     in
         Task.sequence dead
-            |> Task.andThen (\_ -> spawnRequests router new ongoing)
+            |> Task.andThen (\_ -> spawnRequests router new (State ongoing))
 
 
 spawnRequests :: ∀ msg. Router msg Unit -> List ( String /\ TrackedRequest msg ) -> State msg -> Task Never (State msg)
-spawnRequests router trackedRequests state =
+spawnRequests router trackedRequests st@(State state) =
     case trackedRequests of
         Nil ->
-            Task.succeed state
+            Task.succeed st
 
         ( id /\ trackedRequest ) : others ->
             Process.spawn (toTask router trackedRequest)
-                |> Task.andThen (\process -> spawnRequests router others (Dict.insert id process state))
+                |> Task.andThen (\process -> spawnRequests router others (State (Dict.insert id process state)))
 
 
 toTask :: ∀ msg. Router msg Unit -> TrackedRequest msg -> Task Never Unit
