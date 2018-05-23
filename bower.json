@@ -1,0 +1,23 @@
+{
+  "name": "purescript-pselm-http",
+  "homepage": "https://github.com/pselm/http",
+  "description": "Purescript implementation of Elm's HTTP library",
+  "license": "BSD3",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "output"
+  ],
+  "dependencies": {
+    "purescript-pselm-core": "pselm/core#^4.0.4",
+    "purescript-web-xhr": "^1.1.0"
+  },
+  "devDependencies": {
+    "purescript-pselm-html": "pselm/html#^0.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/pselm/http.git"
+  }
+}
