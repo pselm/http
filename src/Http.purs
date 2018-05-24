@@ -20,6 +20,8 @@ module Elm.Http
 
 import Elm.Default
 
+import DOM.XHR.FormData (FormDataValue(..), toFormData)
+import Data.Foldable (class Foldable)
 import Data.List (List(..))
 import Elm.Http.Internal (Body(..), Expect(..), Header(..), Request(..), Response) as Http.Internal
 import Elm.Json.Decode as Decode
@@ -30,7 +32,7 @@ import Elm.Task (Task)
 import Elm.Task (attempt) as Task
 import Elm.Time (Time)
 import Partial.Unsafe (unsafeCrashWith)
-import Prelude (class Eq)
+import Prelude (class Eq, (>>>))
 
 
 -- REQUESTS
@@ -286,18 +288,13 @@ stringBody =
 
 -- | > Create multi-part bodies for your `Request`, automatically adding the
 -- | > `Content-Type: multipart/form-data` header.
-multipartBody :: List Part -> Body
-multipartBody =
-    unsafeCrashWith "TODO"
-    -- Native.Http.multipart
+multipartBody :: ∀ f. Foldable f => f Part -> Body
+multipartBody = toFormData >>> Http.Internal.FormDataBody
 
 
 -- | > Contents of a multi-part body. Right now it only supports strings, but we
 -- | > will support blobs and files when we get an API for them in Elm.
-data Part
-    = StringPart String String
-
-derive instance eqPart :: Eq Part
+type Part = String /\ FormDataValue
 
 
 -- | > A named chunk of string data.
@@ -308,8 +305,8 @@ derive instance eqPart :: Eq Part
 -- | >         , stringPart "payload" "42"
 -- | >         ]
 stringPart :: String -> String -> Part
-stringPart =
-    StringPart
+stringPart key value =
+    Tuple key (FormDataString value)
 
 
 

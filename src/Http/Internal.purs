@@ -11,6 +11,7 @@ module Elm.Http.Internal
 
 import Elm.Default
 
+import DOM.XHR.Types (FormData)
 import Elm.Dict (Dict)
 import Elm.Time (Time)
 import Prelude (class Eq, class Functor)
@@ -42,9 +43,7 @@ derive instance functorExpect :: Functor Expect
 data Body
     = EmptyBody
     | StringBody String String
-    | FormDataBody
-
-derive instance eqBody :: Eq Body
+    | FormDataBody FormData
 
 
 data Header
