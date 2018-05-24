@@ -20,19 +20,26 @@ module Elm.Http
 
 import Elm.Default
 
+import Control.Monad.Aff (Error) as Aff
+import Control.Monad.Aff (effCanceler)
+import Control.Monad.Eff (Eff)
+import DOM.Event.EventTarget (EventListener, addEventListener, eventListener)
+import DOM.Event.Types (EventType(..))
 import DOM.XHR.FormData (FormDataValue(..), toFormData)
+import Data.Either (Either(..))
 import Data.Foldable (class Foldable)
 import Data.List (List(..))
 import Elm.Http.Internal (Body(..), Expect(..), Header(..), Request(..), Response) as Http.Internal
+import Elm.Http.Internal (RawRequest)
 import Elm.Json.Decode as Decode
 import Elm.Json.Encode as Encode
 import Elm.Maybe (Maybe(..))
 import Elm.Result (Result(..))
-import Elm.Task (Task)
+import Elm.Task (Task, makeTask)
 import Elm.Task (attempt) as Task
 import Elm.Time (Time)
-import Partial.Unsafe (unsafeCrashWith)
-import Prelude (class Eq, (>>>))
+import Prelude (class Eq, bind, discard, pure, ($), (>>>))
+import Web.XHR (XMLHttpRequest, abort, open, string, xmlHttpRequest, xmlHttpRequestToEventTarget)
 
 
 -- REQUESTS
@@ -74,8 +81,29 @@ send resultToMessage req =
 -- | > to chain together a bunch of requests (or any other tasks) in a single command.
 toTask :: ∀ a. Request a -> Task Error a
 toTask (Http.Internal.Request req) =
-    unsafeCrashWith "TODO"
-    -- Native.Http.toTask req Nothing
+    -- TODO: Add the progress checking parts
+    makeTask \cb -> do
+        xmlReq <- xmlHttpRequest string
+
+        let target = xmlHttpRequestToEventTarget xmlReq
+        let errorHandler = eventListener \_ -> cb $ Right $ Left $ NetworkError
+        let timeoutHandler = eventListener \_ -> cb $ Right $ Left $ Timeout
+
+        addEventListener (EventType "error") errorHandler false target
+        addEventListener (EventType "timeout") timeoutHandler false target
+        addEventListener (EventType "load") (handleResponse xmlReq req cb) false target
+
+        -- TODO: The Elm code catches exceptions from `open` and constructs
+        -- a `BadUrl` error.
+        open req.method req.url xmlReq
+
+        pure $ effCanceler $ abort xmlReq
+
+
+handleResponse :: ∀ e a x y. XMLHttpRequest x -> RawRequest a -> (Either Aff.Error (Either Error a) -> Eff e y) -> EventListener e
+handleResponse xmlReq req cb =
+    eventListener \_ ->
+        cb $ Right $ Left $ Timeout
 
 
 -- | > A `Request` can fail in a couple ways:
