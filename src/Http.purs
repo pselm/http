@@ -26,8 +26,9 @@ import Control.Monad.Eff (Eff)
 import DOM.Event.EventTarget (EventListener, addEventListener, eventListener)
 import DOM.Event.Types (EventType(..))
 import DOM.XHR.FormData (FormDataValue(..), toFormData)
+import DOM.XHR.Types (FormData) as DOM.XHR.Types
 import Data.Either (Either(..))
-import Data.Foldable (class Foldable)
+import Data.Foldable (class Foldable, for_)
 import Data.List (List(..))
 import Elm.Http.Internal (Body(..), Expect(..), Header(..), Request(..), Response) as Http.Internal
 import Elm.Http.Internal (RawRequest)
@@ -37,9 +38,11 @@ import Elm.Maybe (Maybe(..))
 import Elm.Result (Result(..))
 import Elm.Task (Task, makeTask)
 import Elm.Task (attempt) as Task
-import Elm.Time (Time)
+import Elm.Time (Time, fromTime)
 import Prelude (class Eq, bind, discard, pure, ($), (>>>))
-import Web.XHR (XMLHttpRequest, abort, open, string, xmlHttpRequest, xmlHttpRequestToEventTarget)
+import Unsafe.Coerce (unsafeCoerce)
+import Web.XHR (FormData, send) as Web.XHR
+import Web.XHR (XMLHttpRequest, abort, open, sendFormData, sendString, setRequestHeader, setTimeout, setWithCredentials, string, xmlHttpRequest, xmlHttpRequestToEventTarget)
 
 
 -- REQUESTS
@@ -83,6 +86,8 @@ toTask :: ∀ a. Request a -> Task Error a
 toTask (Http.Internal.Request req) =
     -- TODO: Add the progress checking parts
     makeTask \cb -> do
+        -- For now, it's always a string response type, but that could change
+        -- in future.
         xmlReq <- xmlHttpRequest string
 
         let target = xmlHttpRequestToEventTarget xmlReq
@@ -97,7 +102,32 @@ toTask (Http.Internal.Request req) =
         -- a `BadUrl` error.
         open req.method req.url xmlReq
 
+        for_ req.headers \(Http.Internal.Header key value) ->
+            setRequestHeader key value xmlReq
+
+        for_ req.timeout \t ->
+            setTimeout (fromTime t) xmlReq
+
+        setWithCredentials req.withCredentials xmlReq
+
+        case req.body of
+            Http.Internal.EmptyBody ->
+                Web.XHR.send xmlReq
+
+            Http.Internal.FormDataBody formData ->
+                sendFormData (coerceFormData formData) xmlReq
+
+            Http.Internal.StringBody contentType payload -> do
+                setRequestHeader "Content-Type" contentType xmlReq
+                sendString payload xmlReq
+
         pure $ effCanceler $ abort xmlReq
+
+
+-- | These are both representations of the Javascript FormData, but
+-- | they aren't integrated ...
+coerceFormData :: DOM.XHR.Types.FormData -> Web.XHR.FormData
+coerceFormData = unsafeCoerce
 
 
 handleResponse :: ∀ e a x y. XMLHttpRequest x -> RawRequest a -> (Either Aff.Error (Either Error a) -> Eff e y) -> EventListener e
