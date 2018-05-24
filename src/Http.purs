@@ -30,6 +30,11 @@ import DOM.XHR.Types (FormData) as DOM.XHR.Types
 import Data.Either (Either(..))
 import Data.Foldable (class Foldable, for_)
 import Data.List (List(..))
+import Data.Map (Map, alter)
+import Data.Map (empty) as Map
+import Data.Maybe (fromMaybe)
+import Data.String (Pattern(..), drop, indexOf, split, splitAt)
+import Data.Traversable (foldl)
 import Elm.Http.Internal (Body(..), Expect(..), Header(..), Request(..), Response) as Http.Internal
 import Elm.Http.Internal (RawRequest)
 import Elm.Json.Decode as Decode
@@ -39,10 +44,10 @@ import Elm.Result (Result(..))
 import Elm.Task (Task, makeTask)
 import Elm.Task (attempt) as Task
 import Elm.Time (Time, fromTime)
-import Prelude (class Eq, bind, discard, pure, ($), (>>>))
+import Prelude (class Eq, bind, discard, pure, (#), ($), (<#>), (<$>), (<>), (>>=), (>>>))
 import Unsafe.Coerce (unsafeCoerce)
 import Web.XHR (FormData, send) as Web.XHR
-import Web.XHR (XMLHttpRequest, abort, open, sendFormData, sendString, setRequestHeader, setTimeout, setWithCredentials, string, xmlHttpRequest, xmlHttpRequestToEventTarget)
+import Web.XHR (XHR, XMLHttpRequest, abort, getAllResponseHeaders, open, response, responseURL, sendFormData, sendString, setRequestHeader, setTimeout, setWithCredentials, status, statusText, string, xmlHttpRequest, xmlHttpRequestToEventTarget)
 
 
 -- REQUESTS
@@ -84,10 +89,8 @@ send resultToMessage req =
 -- | > to chain together a bunch of requests (or any other tasks) in a single command.
 toTask :: ∀ a. Request a -> Task Error a
 toTask (Http.Internal.Request req) =
-    -- TODO: Add the progress checking parts
     makeTask \cb -> do
-        -- For now, it's always a string response type, but that could change
-        -- in future.
+        -- TODO: This should actually depend a bit on req.expect, but for now it's all strings.
         xmlReq <- xmlHttpRequest string
 
         let target = xmlHttpRequestToEventTarget xmlReq
@@ -130,10 +133,67 @@ coerceFormData :: DOM.XHR.Types.FormData -> Web.XHR.FormData
 coerceFormData = unsafeCoerce
 
 
-handleResponse :: ∀ e a x y. XMLHttpRequest x -> RawRequest a -> (Either Aff.Error (Either Error a) -> Eff e y) -> EventListener e
+handleResponse :: ∀ e a y. XMLHttpRequest String -> RawRequest a -> (Either Aff.Error (Either Error a) -> Eff (xhr :: XHR | e) y) -> EventListener (xhr :: XHR | e)
 handleResponse xmlReq req cb =
-    eventListener \_ ->
-        cb $ Right $ Left $ Timeout
+    eventListener \_ -> do
+        response <-
+            toResponse xmlReq
+
+        if response.status.code < 200 || 300 <= response.status.code
+            then
+                -- TODO: The Elm code gets the `responseText` and puts it in
+                -- the body of the response.
+                cb $ Right $ Left $ BadStatus response
+            else
+                case req.expect of
+                    Http.Internal.ExpectString func ->
+                        case func response of
+                            Ok value ->
+                                cb $ Right $ Right $ value
+
+                            Err err -> do
+                                -- TODO: The Elm code gets the `responseText`
+                                -- and puts it in the body of the response.
+                                cb $ Right $ Left $ BadPayload err response
+
+
+toResponse :: ∀ e. XMLHttpRequest String -> Eff (xhr :: XHR | e) (Response String)
+toResponse xmlReq = do
+    code <- status xmlReq
+    message <- statusText xmlReq
+    headers <- parseHeaders <$> getAllResponseHeaders xmlReq
+    url <- responseURL xmlReq
+    body <- fromMaybe "" <$> response xmlReq
+
+    pure
+        { url
+        , status : { code, message }
+        , headers
+        , body
+        }
+
+
+parseHeaders :: Maybe String -> Map String String
+parseHeaders rawHeaders =
+    rawHeaders
+    <#> split (Pattern "\x000d\x000a")
+    # fromMaybe []
+    # foldl parseHeader Map.empty
+
+    where
+        parseHeader accum pair =
+            fromMaybe accum $
+            indexOf (Pattern "\x003a\x0020") pair
+                >>= flip splitAt pair
+                <#> (\{before, after} ->
+                        alter (case _ of
+                            Just oldValue ->
+                                Just $ oldValue <> ", " <> drop 2 after
+
+                            Nothing ->
+                                Just $ drop 2 after
+                        ) before accum
+                    )
 
 
 -- | > A `Request` can fail in a couple ways:
